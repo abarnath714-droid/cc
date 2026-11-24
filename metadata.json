@@ -1,0 +1,6 @@
+{
+  "name": "HarvestBridge — Food Donation Management System",
+  "description": "Connect surplus food donors with community NGOs to rescue fresh meals, coordinate pickups, and track donations from listing to completion.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
