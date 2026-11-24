@@ -49,6 +49,30 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+async function parseJsonSafely(res: Response, fallbackMessage: string) {
+  const text = await res.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(res.ok ? fallbackMessage : `${fallbackMessage} (HTTP ${res.status})`);
+  }
+}
+
+function formatGoogleSignInError(err: unknown): Error {
+  const code = (err as { code?: string })?.code;
+  if (code === 'auth/popup-blocked') {
+    return new Error('Sign-in popup was blocked by your browser. Allow popups or sign in with email and password.');
+  }
+  if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+    return new Error('Google sign-in was cancelled before completion.');
+  }
+  if (code === 'auth/unauthorized-domain') {
+    return new Error('Google sign-in is not authorized for this domain yet. Please use email and password.');
+  }
+  return err instanceof Error ? err : new Error('Google sign-in failed.');
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -108,9 +132,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
     });
-    const data = await res.json();
+    const data = await parseJsonSafely(res, 'Invalid email or password.');
     if (!res.ok) {
       throw new Error(data.error || 'Invalid email or password.');
+    }
+    if (auth.currentUser) {
+      firebaseSignOut(auth).catch(() => {});
     }
     tokenRef.current = data.token;
     setUser(data.user);
@@ -134,9 +161,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
+      const data = await parseJsonSafely(res, 'Registration failed.');
       if (!res.ok) {
         throw new Error(data.error || 'Registration failed.');
+      }
+      if (auth.currentUser) {
+        firebaseSignOut(auth).catch(() => {});
       }
       tokenRef.current = data.token;
       setUser(data.user);
@@ -158,9 +188,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
+      const data = await parseJsonSafely(res, 'Unable to set up administrator account.');
       if (!res.ok) {
         throw new Error(data.error || 'Unable to set up administrator account.');
+      }
+      if (auth.currentUser) {
+        firebaseSignOut(auth).catch(() => {});
       }
       tokenRef.current = data.token;
       setUser(data.user);
@@ -176,7 +209,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       phone?: string;
       address?: string;
     }): Promise<{ user?: User; needsProfile?: boolean }> => {
-      const cred = await signInWithPopup(auth, googleAuthProvider);
+      let cred;
+      try {
+        cred = await signInWithPopup(auth, googleAuthProvider);
+      } catch (err) {
+        throw formatGoogleSignInError(err);
+      }
       const idToken = await cred.user.getIdToken();
 
       const res = await fetch('/api/auth/google-sync', {
@@ -187,7 +225,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         },
         body: JSON.stringify(profile || {}),
       });
-      const data = await res.json();
+      const data = await parseJsonSafely(res, 'Google sign-in failed.');
 
       if (res.status === 409 && data.needsProfile) {
         setPendingGoogleProfile({
@@ -231,7 +269,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           name: pendingGoogleProfile.name,
         }),
       });
-      const data = await res.json();
+      const data = await parseJsonSafely(res, 'Unable to finish creating your profile.');
       if (!res.ok) {
         throw new Error(data.error || 'Unable to finish creating your profile.');
       }

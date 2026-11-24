@@ -179,25 +179,36 @@ function compressImageToDataUrl(file: File): Promise<string> {
       const img = new Image();
       img.onerror = () => reject(new Error('Selected file is not a supported image.'));
       img.onload = () => {
-        const maxWidth = 880;
-        const scale = img.width > maxWidth ? maxWidth / img.width : 1;
-        const width = Math.max(1, Math.round(img.width * scale));
-        const height = Math.max(1, Math.round(img.height * scale));
+        const attempts = [
+          { maxWidth: 880, quality: 0.82 },
+          { maxWidth: 680, quality: 0.72 },
+          { maxWidth: 520, quality: 0.62 },
+        ];
         const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
         const ctx = canvas.getContext('2d');
         if (!ctx) {
           reject(new Error('Unable to process image in browser.'));
           return;
         }
-        ctx.drawImage(img, 0, 0, width, height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
-        if (dataUrl.length > 900_000) {
-          reject(new Error('Photo is still too large after compression. Please pick a smaller photo.'));
-          return;
+
+        for (const step of attempts) {
+          const scale = img.width > step.maxWidth ? step.maxWidth / img.width : 1;
+          const width = Math.max(1, Math.round(img.width * scale));
+          const height = Math.max(1, Math.round(img.height * scale));
+          canvas.width = width;
+          canvas.height = height;
+          ctx.clearRect(0, 0, width, height);
+          ctx.drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL('image/jpeg', step.quality);
+          if (dataUrl.length <= 900_000) {
+            resolve(dataUrl);
+            return;
+          }
         }
-        resolve(dataUrl);
+
+        reject(
+          new Error('Photo is still too large after compression. Please pick a smaller photo.')
+        );
       };
       img.src = String(reader.result);
     };

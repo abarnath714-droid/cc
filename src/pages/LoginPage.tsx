@@ -118,7 +118,7 @@ export function LoginPage() {
     }
     setSubmitting(true);
     try {
-      const created = await claimAdminAccount({
+      await claimAdminAccount({
         name: adminName.trim(),
         email: adminEmail.trim(),
         password: adminPassword,

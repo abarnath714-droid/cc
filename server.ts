@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
-import express, { type Response } from 'express';
+import express, { type NextFunction, type Request, type Response } from 'express';
 import { createServer as createViteServer } from 'vite';
 import { hashPassword, signSessionToken, verifyPassword } from './src/lib/auth-crypto.ts';
 import {
@@ -1161,12 +1161,14 @@ async function startServer() {
         broadcastUpdate('donations_changed');
         broadcastUpdate('users_changed');
         broadcastUpdate('requests_changed');
+        broadcastUpdate('receiver_requests_changed');
         return res.json({ cleared: true });
       }
       await seedDemoData(true);
       broadcastUpdate('donations_changed');
       broadcastUpdate('users_changed');
       broadcastUpdate('requests_changed');
+      broadcastUpdate('receiver_requests_changed');
       res.json({ seeded: true });
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : 'Failed to manage demo records.';
@@ -1199,6 +1201,32 @@ async function startServer() {
     }
   });
 
+  // Return JSON 404 for unknown API routes and JSON errors for malformed/oversized payloads
+  app.use('/api', (_req, res) => {
+    res.status(404).json({ error: 'API endpoint not found.' });
+  });
+
+  app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
+    if (res.headersSent) {
+      return next(err);
+    }
+    const errObj = err as { type?: string; status?: number; message?: string };
+    if (errObj?.type === 'entity.too.large' || errObj?.status === 413) {
+      return res.status(413).json({
+        error: 'Request payload is too large. Please upload a smaller image.',
+      });
+    }
+    if (err instanceof SyntaxError && errObj?.status === 400) {
+      return res.status(400).json({ error: 'Invalid JSON request payload.' });
+    }
+    if (req.path.startsWith('/api')) {
+      return res.status(errObj?.status || 500).json({
+        error: errObj?.message || 'Unexpected server error.',
+      });
+    }
+    return next(err);
+  });
+
   // Vite middleware in development, static files in production
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
@@ -1219,7 +1247,7 @@ async function startServer() {
     });
   }
 
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`HarvestBridge server listening on http://0.0.0.0:${PORT}`);
   });
